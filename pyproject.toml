@@ -1,0 +1,25 @@
+[project]
+name = "rag-based-mcp-server-using-pinecone"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastmcp>=2.10.0",
+    "transformers>=4.51.0",
+    "torch>=2.3.0",
+    "pinecone>=6.0.0",
+    "pypdf>=5.0.0",
+    "python-dotenv>=1.1.0",
+    "llama-cpp-python>=0.3.31",
+    "ragas==0.2.15",
+    "langchain-community==0.3.27",
+]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

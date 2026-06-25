@@ -1,0 +1,18 @@
+services:
+  rag-mcp-server:
+    build: .
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - hf-cache:/root/.cache/huggingface
+
+volumes:
+  hf-cache:
