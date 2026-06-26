@@ -1,12 +1,9 @@
-import os
-
+import config
 from server import mcp
 
 
 def main():
-    host = os.environ.get("MCP_HOST", "127.0.0.1")
-    port = int(os.environ.get("MCP_PORT", "8000"))
-    mcp.run(transport="http", host=host, port=port)
+    mcp.run(transport="http", host=config.MCP_HOST, port=config.MCP_PORT)
 
 
 if __name__ == "__main__":

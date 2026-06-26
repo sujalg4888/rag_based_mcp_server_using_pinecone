@@ -1,5 +1,5 @@
 # eval.py
-# Ragas evaluation of the RAG pipeline (server.py: retrieve + generate_answer).
+# Ragas evaluation of the RAG pipeline (server.py: retrieve + generate).
 # Calls the same Ollama-backed models as the server (no API key needed).
 # Run: uv run python eval.py
 
@@ -22,9 +22,7 @@ from ragas.llms.base import BaseRagasLLM
 from ragas.metrics import AnswerRelevancy, Faithfulness
 from ragas.run_config import RunConfig
 
-import models
-from models import embed_texts
-from server import _retrieve, generate_answer
+from server import _embedder, _generator, _retriever
 
 TOP_K = 3
 
@@ -39,7 +37,10 @@ TEST_SET = [
 
 
 class LocalLlamaLLM(BaseRagasLLM):
-    """Wraps the Ollama-backed generation model (models.GEN_MODEL_NAME) for ragas."""
+    """Wraps a Generator's chat() (interfaces.py) for ragas."""
+
+    def __init__(self, generator):
+        self._generator = generator
 
     def generate_text(
         self, prompt: PromptValue, n: int = 1, temperature: float = 1e-8, stop=None, callbacks=None
@@ -47,10 +48,11 @@ class LocalLlamaLLM(BaseRagasLLM):
         text = prompt.to_string()
         generations = []
         for _ in range(n):
-            response = models._client.chat(
-                model=models.GEN_MODEL_NAME,
-                messages=[{"role": "user", "content": text}],
-                options={"temperature": temperature, "num_predict": 512, "stop": stop},
+            response = self._generator.chat(
+                [{"role": "user", "content": text}],
+                temperature=temperature,
+                num_predict=512,
+                stop=stop,
             )
             content = response["message"]["content"] or ""
             generations.append(Generation(text=content.strip()))
@@ -65,13 +67,16 @@ class LocalLlamaLLM(BaseRagasLLM):
 
 
 class LocalEmbeddings(BaseRagasEmbeddings):
-    """Wraps models.embed_texts (Qwen3-Embedding-0.6B) for ragas."""
+    """Wraps an Embedder (interfaces.py) for ragas."""
+
+    def __init__(self, embedder):
+        self._embedder = embedder
 
     def embed_query(self, text: str) -> list[float]:
-        return embed_texts([text])[0]
+        return self._embedder.embed([text])[0]
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return embed_texts(texts)
+        return self._embedder.embed(texts)
 
     async def aembed_query(self, text: str) -> list[float]:
         return await asyncio.to_thread(self.embed_query, text)
@@ -84,9 +89,9 @@ def build_dataset(top_k: int = TOP_K) -> EvaluationDataset:
     rows = []
     for case in TEST_SET:
         question = case["question"]
-        matches = _retrieve(question, top_k)
+        matches = _retriever.retrieve(question, top_k)
         contexts = [m["text"] for m in matches]
-        answer = generate_answer(question, "\n\n".join(contexts))
+        answer = _generator.generate(question, "\n\n".join(contexts))
         rows.append(
             {
                 "user_input": question,
@@ -102,8 +107,8 @@ def main():
     result = evaluate(
         dataset,
         metrics=[Faithfulness(), AnswerRelevancy()],
-        llm=LocalLlamaLLM(),
-        embeddings=LocalEmbeddings(),
+        llm=LocalLlamaLLM(_generator),
+        embeddings=LocalEmbeddings(_embedder),
         # llama.cpp's context is not thread-safe for concurrent calls.
         run_config=RunConfig(max_workers=1),
     )
