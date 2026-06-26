@@ -1,21 +1,29 @@
 # eval.py
 # Ragas evaluation of the RAG pipeline (server.py: retrieve + generate_answer).
-# Reuses the already-loaded local Qwen models (no second model load, no API key).
+# Calls the same Ollama-backed models as the server (no API key needed).
 # Run: uv run python eval.py
 
 import asyncio
-import threading
+
+# nest_asyncio 1.6.0 doesn't support Python 3.14's asyncio internals: its
+# patch breaks current_task() tracking inside asyncio.timeout, which ragas's
+# per-metric wait_for relies on, causing "Timeout should be used inside a
+# task" and every metric scoring as nan. We never run inside a nested event
+# loop here, so the patch isn't needed — disable it before ragas imports it.
+import nest_asyncio
+
+nest_asyncio.apply = lambda *args, **kwargs: None
 
 from langchain_core.outputs import Generation, LLMResult
 from langchain_core.prompt_values import PromptValue
-from llama_cpp.llama_types import CreateChatCompletionResponse
 from ragas import EvaluationDataset, evaluate
 from ragas.embeddings.base import BaseRagasEmbeddings
 from ragas.llms.base import BaseRagasLLM
 from ragas.metrics import AnswerRelevancy, Faithfulness
 from ragas.run_config import RunConfig
 
-from models import _gen_model, embed_texts
+import models
+from models import embed_texts
 from server import _retrieve, generate_answer
 
 TOP_K = 3
@@ -30,27 +38,22 @@ TEST_SET = [
 ]
 
 
-_LLAMA_LOCK = threading.Lock()  # llama.cpp's context is not safe for concurrent calls
-
-
 class LocalLlamaLLM(BaseRagasLLM):
-    """Wraps the already-loaded llama.cpp model (models._gen_model) for ragas."""
+    """Wraps the Ollama-backed generation model (models.GEN_MODEL_NAME) for ragas."""
 
     def generate_text(
         self, prompt: PromptValue, n: int = 1, temperature: float = 1e-8, stop=None, callbacks=None
     ) -> LLMResult:
         text = prompt.to_string()
         generations = []
-        with _LLAMA_LOCK:
-            for _ in range(n):
-                response: CreateChatCompletionResponse = _gen_model.create_chat_completion(
-                    messages=[{"role": "user", "content": text}],
-                    max_tokens=512,
-                    temperature=temperature,
-                    stop=stop,
-                )  # type: ignore[assignment]
-                content = response["choices"][0]["message"]["content"] or ""
-                generations.append(Generation(text=content.strip()))
+        for _ in range(n):
+            response = models._client.chat(
+                model=models.GEN_MODEL_NAME,
+                messages=[{"role": "user", "content": text}],
+                options={"temperature": temperature, "num_predict": 512, "stop": stop},
+            )
+            content = response["message"]["content"] or ""
+            generations.append(Generation(text=content.strip()))
         return LLMResult(generations=[generations])
 
     async def agenerate_text(
